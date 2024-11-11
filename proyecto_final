@@ -1,0 +1,852 @@
+#include <iostream>
+#include <vector>
+#include <map>
+#include <set>
+#include <algorithm>
+#include <stack>
+#include <iostream>
+#include <windows.h>
+
+using namespace std;
+
+struct Properties{
+    vector<char> firstSet;  // Conjunto de símbolos de first
+    vector<char> followSet;  // Conjunto de símbolos de follow
+    bool hasEpsilon = false; // Indica si FIRST contiene epsilon 
+};
+
+struct Gramatica{
+    map<char, vector<string>> gramatica; // Almacena producciones para cada no terminal
+    vector<char> order; // Orden de los no terminales, para conservar el orden de entrada
+};
+
+vector<string> getProductions(string prod){
+    vector<string> derivations; // Se crea un vector para almacenar las producciones derivadas
+    // Recorre cada caracter de la cadena de la producción
+    for(int i=0;i<prod.size();i++){
+        string dev = ""; // Se crea una cadena vacia para almacenar una derivacion
+        // Recorre los caracteres de la produccion hasta encontrar un espacio en blanco
+        // Los espacios separan las diferentes derivaciones
+        while(prod[i] != ' ' && i < prod.size()){
+            dev = dev + prod[i];  // Añade el caracter a la derivacion
+            i++;
+        }
+        derivations.push_back(dev); // Añade la derivacion al vector de derivaciones
+    }
+    return derivations; // Devuelve el vector con todas las derivaciones
+}
+
+Gramatica getGrammar(int gLines){
+    Gramatica gramatica; // Se crea una instancia de la estructura Gramatica para almacenar la gramatica
+    // Se repite el proceso gLines veces, una vez por cada linea de producción de la gramatica
+    while(gLines--){
+        string production; getline(cin, production);  // Se crea una variable para almacenar una linea de produccion. Se lee la línea de producción desde la entrada estandar
+        char head = production[0];  // El primer caracter de la producción es el simbolo no terminal (cabeza)
+        vector<string> prods = getProductions(production.substr(2)); // Se obtiene la lista de derivaciones (producciones) de la cadena, excluyendo la cabeza
+        gramatica.order.push_back(head); // Se agrega la cabeza del no terminal a la lista de orden de la gramatica
+        gramatica.gramatica[head] = prods; // Se asocia la cabeza del no terminal con las producciones derivadas en el mapa de la gramatica
+    }
+    return gramatica;
+}
+
+bool findInFirst(vector<char> first, char terminal){
+    bool exist = false; // Se inicializa la variable ecomo false, para indicar que el terminal aun no ha sido encontrado
+    // Se recorre el vector first para buscar si el terminal esta presente
+    for(int i=0;i<first.size() && !exist;i++){
+        if(first[i] == terminal){
+            exist = true;  // Si el terminal se encuentra en el vector first, se cambia el valor de exist a true
+        }
+    }
+    return exist;
+}
+
+void mergeFirsts(map<char, Properties>& properties, char head, char value){
+    // Se recorre el conjunto firstSet de la produccion correspondiente al value
+    for(char terminal: properties[value].firstSet){
+        // Se verifica si el terminal no está en el conjunto firstSet de la cabeza
+        // y si el terminal no es epsilon
+        if(!findInFirst(properties[head].firstSet, terminal) && terminal != 'e'){
+            // Si el terminal no está en el conjunto firstSet de head, se agrega al conjunto
+            properties[head].firstSet.push_back(terminal);
+        }
+    }
+}
+
+void findFirst(map<char, Properties>& properties, Gramatica gramatica, char nonTerminal) {
+    // Obtiene una referencia al conjunto first del no terminal actual
+    vector<char>& first = properties[nonTerminal].firstSet;
+    bool hasNext = false; // Indica si hay otra derivación para el no terminal
+
+    // Recorre cada producción del no terminal actual
+    for(string dev: gramatica.gramatica[nonTerminal]) {
+        int i = 0;
+        char value = dev[i]; // Primer símbolo de la producción
+
+        // Si la produccion es recursiva (comienza con el no terminal), la ignora
+        if(value == nonTerminal) {
+            if(i+1 < dev.size()) hasNext = true; // Marca que hay otra derivacion
+            continue;
+        }
+
+        // Caso 1: el primer simbolo es un no terminal
+        if(isupper(value)) {
+            // Si first del no terminal no ha sido calculado, lo calcula recursivamente
+            if(properties[value].firstSet.size() == 0) {
+                findFirst(properties, gramatica, value);
+            }
+            // Combinamos first del simbolo actual en first del no terminal
+            mergeFirsts(properties, nonTerminal, value);
+            i++;
+
+            // Revisamos si el simbolo puede derivar epsilon y sigue al siguiente símbolo
+            while(properties[value].hasEpsilon && i < dev.size()) {
+                value = dev[i];
+
+                // Caso 1.1: si el siguiente simbolo es terminal, lo agrega a first
+                if(!isupper(value)) {
+                    if(!findInFirst(first, value)) first.push_back(value);
+                    break;
+                } else { // Caso 1.2: si el siguiente simbolo es un no terminal
+                    if(properties[value].firstSet.size() == 0) {
+                        findFirst(properties, gramatica, value);
+                    }
+                    mergeFirsts(properties, nonTerminal, value);
+                    i++;
+                }
+
+                // Caso 1.3: si el ultimo símbolo tambien deriva epsilon, añade epsilon a first del no terminal
+                if(i == dev.size() && properties[value].hasEpsilon) {
+                    first.push_back('e');
+                    properties[nonTerminal].hasEpsilon = true;
+                }
+            }
+        } else { // Caso 2: el primer simbolo es terminal o epsilon
+            if(!findInFirst(first, value)) first.push_back(value); // Añade el terminal a first
+            if(value == 'e') properties[nonTerminal].hasEpsilon = true; // Marca si contiene epsilon
+        }
+    }
+
+    // Manejamos recursión indirecta verificando otras producciones del mismo no terminal
+    if(properties[nonTerminal].hasEpsilon && hasNext) {
+        for(string dev: gramatica.gramatica[nonTerminal]) {
+            if(dev[0] == nonTerminal && dev.size() > 1) {
+                int i = 1;
+                char next = dev[i];
+
+                // Añade first del siguiente simbolo si es un no terminal
+                if(isupper(next)) {
+                    if(properties[next].firstSet.size() == 0) findFirst(properties, gramatica, next);
+                    mergeFirsts(properties, nonTerminal, next);
+
+                    // Revisa si el siguiente simbolo puede derivar epsilon
+                    while(properties[next].hasEpsilon && i < dev.size()) {
+                        i++;
+                        next = dev[i];
+                        if(isupper(next)) {
+                            if(properties[next].firstSet.size() == 0) findFirst(properties, gramatica, next);
+                            mergeFirsts(properties, nonTerminal, next);
+                        } else { // Si el siguiente es un terminal
+                            if(!findInFirst(first, next)) first.push_back(next);
+                            break;
+                        }
+                    }
+                } else { // Añade terminal directo si sigue a una recursión
+                    if(!findInFirst(first, next)) first.push_back(next);
+                }
+            }
+        }
+    }
+}
+
+void getFirsts(map<char, Properties>& properties, Gramatica gramatica) {
+    // Calcula first para cada no terminal en el orden especificado
+    for(char head: gramatica.order) {
+        if(properties[head].firstSet.size() == 0) {
+            findFirst(properties, gramatica, head);
+        }
+    }
+}
+
+int findInProduction(string production, char value) {
+    // Encuentra la posición de un valor en una producción
+    for(int i=0; i<production.size(); i++) {
+        if(production[i] == value) return i;
+    }
+    return -1;
+}
+
+void addCharToFollow(vector<char>& follow, char terminal) {
+    // Agregamos un terminal al conjunto follow si no está ya presente
+    for(char val: follow) {
+        if(val == terminal) return;
+    }
+    follow.push_back(terminal);
+}
+
+void addFirstToFollow(map<char, Properties>& properties, char nonTerminal, char head) {
+    // Agregamos el conjunto first de un simbolo al conjunto follow de otro, excluyendo epsilon
+    for(char terminal: properties[head].firstSet) {
+        if(terminal != 'e') addCharToFollow(properties[nonTerminal].followSet, terminal);
+    }
+}
+
+void mergeFollows(vector<char>& followB, vector<char> followA) {
+    // Combina el conjunto followA en followB, evitando duplicados
+    for(char inFollowA: followA) {
+        bool found = false;
+        for(char inFollowB: followB) {
+            if(inFollowA == inFollowB) {
+                found = true;
+                break;
+            }
+        }
+        if(!found) followB.push_back(inFollowA);
+    }
+}
+
+void findFollow(map<char, Properties>& properties, Gramatica gramatica, char nonTerminal) {
+    // Calculamos el conjunto follow para un no terminal
+    vector<char>& follow = properties[nonTerminal].followSet;
+
+    // Recorremos cada no terminal y sus producciones
+    for(char head: gramatica.order) {
+        for(string dev: gramatica.gramatica[head]) {
+            int pos = findInProduction(dev, nonTerminal);
+            if(pos >= 0) {
+                // Si hay un simbolo despues del no terminal
+                if(pos+1 < dev.size()) {
+                    char val = dev[pos+1];
+                    if(isupper(val)) {
+                        addFirstToFollow(properties, nonTerminal, val);
+                        int i = 2;
+
+                        // Avanza al siguiente simbolo si deriva epsilon
+                        while(properties[val].hasEpsilon && pos+i < dev.size()) {
+                            val = dev[pos+i];
+                            i++;
+                            if(isupper(val)) {
+                                addFirstToFollow(properties, nonTerminal, val);
+                            } else {
+                                addCharToFollow(follow, val);
+                                break;
+                            }
+                        }
+
+                        // Si el ultimo simbolo tambien deriva epsilon, agrega follow del head
+                        if(pos+i == dev.size() && properties[val].hasEpsilon) {
+                            if(properties[val].followSet.size() == 0) {
+                                findFollow(properties, gramatica, head);
+                            }
+                            mergeFollows(follow, properties[head].followSet);
+                        }
+                    } else {
+                        addCharToFollow(follow, val);
+                    }
+                } else {
+                    if(properties[head].followSet.size() == 0) {
+                        findFollow(properties, gramatica, head);
+                    }
+                    mergeFollows(follow, properties[head].followSet);
+                }
+            }
+        }
+    }
+}
+void getFollows(map<char, Properties>& properties, Gramatica gramatica) {
+    // Añadimos el símbolo de final de cadena ($) al conjunto follow del no terminal inicial s
+    // Esto indica que s, como símbolo inicial, puede ser seguido por el final de la entrada
+    properties['S'].followSet.push_back('$');
+
+    // Calcula el conjunto follow del símbolo inicial s llamando a la funcion findFollow
+    findFollow(properties, gramatica, 'S');
+
+    // Para cada no terminal en el orden de la gramática, calcula su conjunto follow si aún no ha sido calculado
+    // Esto asegura que todos los no terminales tengan su conjunto follow completo al final del proceso
+    for(char head: gramatica.order) {
+        // Solo llama a findFollow si el conjunto follow del no terminal está vacio, para evitar duplicados
+        if(properties[head].followSet.size() == 0) {
+            findFollow(properties, gramatica, head);
+        }
+    }
+}
+
+void printFirsts(map<char, Properties> properties, Gramatica gramatica) {
+    // Imprime el conjunto first de cada no terminal en la gramtica
+    // Recorre cada no terminal en el orden especificado en la gramtica
+    for(const char nonTerminal: gramatica.order) {
+        // Muestra el encabezado indicando el no terminal actual y su conjunto first
+        cout << "First(" << nonTerminal << ") = {";
+        bool first = true; // Variable para gestionar la impresin de comas entre elementos
+
+        // Itera sobre cada simbolo en el conjunto first del no terminal actual
+        for (const char val : properties[nonTerminal].firstSet) {
+            // Agrega una coma antes de cada elemento excepto el primero para separar los simbolos en la salida
+            if (!first) {
+                cout << ", ";
+            }
+            cout << val; // Imprime el simbolo actual en el conjunto first
+            first = false; // Cambia la variable a falso para manejar la coma en las siguientes iteraciones
+        }
+        cout << "}" << endl; 
+    }
+}
+
+void printFollows(map<char, Properties> properties, Gramatica gramatica) {
+    // Imprime el conjunto follow de cada no terminal en la gramatica
+    // Recorre cada no terminal en el orden especificado en la gramatica
+    for(const char nonTerminal: gramatica.order) {
+        // Muestra el encabezado indicando el no terminal actual y su conjunto follow
+        cout << "Follow(" << nonTerminal << ") = {";
+        bool first = true; // Variable para gestionar la impresion de comas entre elementos
+
+        // Itera sobre cada símbolo en el conjunto follow del no terminal actual
+        for (const char val : properties[nonTerminal].followSet) {
+            // Agrega una coma antes de cada elemento excepto el primero para separar los simbolos en la salida
+            if (!first) {
+                cout << ", ";
+            }
+            cout << val; // Imprime el simbolo actual en el conjunto follow
+            first = false; // Cambia la variable a falso para manejar la coma en las siguientes iteraciones
+        }
+        cout << "}" << endl; 
+    }
+}
+
+
+void topDown(map<char, Properties>& properties, Gramatica& gramatica) {
+    // Mapa para registrar las combinaciones [noterminal,terminal] ya vistas
+    map<char, set<char>> seenCombinations;
+    bool isLL1 = true; // Suponemos que la gramatica es LL(1) inicialmente
+
+    for (char nonTerminal : gramatica.order) {  // iteramos sobre cada no terminal en la gramatica
+        vector<string> producciones = gramatica.gramatica[nonTerminal];
+
+        for (const string& produccion : producciones) {  // Iteramos sobre cada produccion del no terminal
+            set<char> firstSetForProduction;  // Almacena los simbolos First de esta produccion
+
+            // Encuentra el conjunto First de esta produccion
+            for (char symbol : produccion) {
+                if (isupper(symbol)) {  // Es un no terminal
+                    firstSetForProduction.insert(properties[symbol].firstSet.begin(), properties[symbol].firstSet.end());
+                    // Si el símbolo contiene epsilon, seguimos analizando el siguiente simbolo
+                    if (!properties[symbol].hasEpsilon) break;
+
+                } else {  // Es un terminal
+                    if (islower(symbol)) {
+                        firstSetForProduction.insert(symbol);
+                    }
+                    break;
+                }
+            }
+
+            // Añadimos el conjunto Follow en caso de epsilon
+            if (firstSetForProduction.count('e')) {
+                firstSetForProduction.insert(properties[nonTerminal].followSet.begin(), properties[nonTerminal].followSet.end());
+                firstSetForProduction.erase('e');
+            }
+
+            // Imprimir en el formato [Noterminal, first[i]] = Producción y verificar LL(1)
+            for (char firstSymbol : firstSetForProduction) {
+                cout << "[" << nonTerminal << ", " << firstSymbol << "] = " << produccion << endl;
+
+                // Verificar si ya hemos visto esta combinación [NoTerminal, terminal]
+                if (seenCombinations[nonTerminal].count(firstSymbol)) {
+                    // Si la combinación ya existe, no es LL(1)
+                    isLL1 = false;
+                } else {
+                    // Agregar la combinación al conjunto visto
+                    seenCombinations[nonTerminal].insert(firstSymbol);
+                }
+            }
+        }
+    }
+
+    // Imprimir si la gramática es LL(1) o no
+    if (isLL1) {
+        cout << "La gramática es LL(1)." << endl;
+    } else {
+        cout << "La gramática NO es LL(1)." << endl;
+    }
+}
+
+// Función para realizar el analisis sintáctico usando una tabla de análisis predictivo
+void predictiveParsing(string w, map<char, map<char, string>>& parsingTable, char startSymbol) {
+    w += '$'; // Añadir el símbolo de fin de cadena
+    stack<char> parsingStack;
+    parsingStack.push('$'); // Simbolo de fin de cadena en el stack
+    parsingStack.push(startSymbol); // Simbolo inicial en el stack
+
+    int index = 0; // indice en la cadena de entrada
+    char a = w[index]; // Primer simbolo de la cadena de entrada
+
+    while (!parsingStack.empty()) {
+        char X = parsingStack.top(); // Simbolo en el tope del stack
+        parsingStack.pop(); // Eliminar el simbolo del tope del stack
+        // Caso 1: Si X es el simbolo de fin de cadena
+        if (X == '$') {
+            // Verifica si la entrada tambien ha terminado
+            if (a == '$') {
+                cout << "Cadena aceptada." << endl;
+            } else {
+                cout << "Error: Entrada no pertenece al lenguaje." << endl;
+            }
+            return;
+            // Caso 2: Si X es un no terminal
+        } else if (isupper(X)) { // X es un no terminal
+            // Verificar si hay una producción válida en la tabla de analisis para este no terminal y el simbolo actual
+            if (parsingTable[X][a].empty()) {
+                cout << "Error: Entrada no pertenece al lenguaje." << endl; // No hay una producción válida
+                return;
+            } else {
+                string production = parsingTable[X][a]; // Obtener la produccion
+                cout << X << " -> " << production << endl; // Imprimir la produccion aplicada
+
+                // Insertar la produccion en el stack en orden inverso
+                for (int i = production.size() - 1; i >= 0; --i) {
+                    if (production[i] != 'e') { // Evitar epsilon
+                        parsingStack.push(production[i]); // Insertar cada simbolo de la producción en el stack
+                    }
+                }
+            }
+            // Caso 3: Si X es un terminal
+        } else { // X es un terminal
+            if (X == a) { // Si el terminal del stack coincide con el simbolo actual de la entrada
+                index++; // Avanzar en la entrada
+                a = w[index]; // Actualizar el simbolo actual de la entrada
+            } else {
+                cout << "Error: Entrada no coincide." << endl; // Hay un desajuste entre la entrada y el analisis
+                return;
+            }
+        }
+    }
+
+    cout << "Cadena rechazada." << endl;
+}
+
+// Construir la tabla de analisis predictivo
+void buildParsingTable(map<char, Properties>& properties, Gramatica& gramatica, map<char, map<char, string>>& parsingTable) {
+    // Iteramos sobre cada no terminal en el orden de la gramática
+    for (char nonTerminal : gramatica.order) {
+        // Iteramos sobre cada producción del no terminal actual
+        for (const string& production : gramatica.gramatica[nonTerminal]) {
+            set<char> firstSetForProduction;// Conjunto de First para la produccion actual
+
+            // Obtencion del primer conjunto para esta produccion
+            for (char symbol : production) {
+                if (isupper(symbol)) {  // Es un no terminal
+                    firstSetForProduction.insert(properties[symbol].firstSet.begin(), properties[symbol].firstSet.end());
+                    // Si el no terminal no tiene epsilon, no se debe seguir buscando más símbolos
+                    if (!properties[symbol].hasEpsilon) break;
+                } else {  // Es un terminal
+                    firstSetForProduction.insert(symbol);
+                    break; // No es necesario continuar porque los terminales no tienen mas derivacion
+                }
+            }
+
+            // Si la produccion contiene epsilon, se añaden las producciones del conjunto Follow
+            if (firstSetForProduction.count('e')) {
+                firstSetForProduction.insert(properties[nonTerminal].followSet.begin(), properties[nonTerminal].followSet.end());
+                firstSetForProduction.erase('e');
+            }
+
+            // Llenar la tabla de analisis predictivo
+            for (char firstSymbol : firstSetForProduction) {
+                // Se coloca la producción en la celda correspondiente en la tabla
+                parsingTable[nonTerminal][firstSymbol] = production;
+            }
+        }
+    }
+}
+
+vector<pair<char, string>> closure(const vector<pair<char, string>>& items, const map<char, vector<string>>& grammar) {
+    // Inicializa el conjunto resultante con los items de entrada (items)
+    vector<pair<char, string>> result = items;
+    bool added;//  para verificar si se agregaron nuevos items en la iteracion
+    // La función sigue ejecutandose hasta que no se agreguen nuevos items
+    do {
+        added = false;
+        // Iteramos sobre cada ítem en el conjunto de resultados
+        for (const auto& item : result) {
+            // Encuentra la posicion del punto  en la produccion
+            size_t dotPos = item.second.find('.');
+            // Si el punto se encuentra y hay símbolos despues de él
+            if (dotPos != string::npos && dotPos + 1 < item.second.size()) {
+                char nextSymbol = item.second[dotPos + 1];// El siguiente simbolo despues del punto
+
+                if (isupper(nextSymbol)) {
+                    // Se recorre todas las producciones del no terminal en la gramatica
+                    for (const string& prod : grammar.at(nextSymbol)) {
+                        // Crea un nuevo item con el no terminal y su produccion comenzando con un punto
+                        pair<char, string> newItem = {nextSymbol, "." + prod};
+                        // Si este item no está en el conjunto de resultados, lo añade
+                        if (find(result.begin(), result.end(), newItem) == result.end()) {
+                            result.push_back(newItem);//se añade el nuevo item
+                            added = true; // Se añadió un ítem, por lo que se pone true
+                        }
+                    }
+                }
+            }
+        }
+    } while (added);
+
+    return result;
+}
+
+// Funcion para calcular el automata canónico ( estados y transiciones)
+pair<vector<vector<pair<char, string>>>, map<pair<int, char>, int>> computeCanonicalAutomaton(const map<char, vector<string>>& grammar) {
+
+    // collection almacena los estados del autómata canonico, cada estado es un conjunto de ítems
+    vector<vector<pair<char, string>>> collection;
+    // transitions guarda las transiciones entre los estados, con el formato (estado, símbolo) - estado al que se transita
+    map<pair<int, char>, int> transitions;
+
+    // Estado inicial
+    
+    vector<pair<char, string>> startItem = {{'W', "." + grammar.at('W')[0]}};
+    // Calculamos la clausura del item inicial y lo agregamos al conjunto de estados
+    collection.push_back(closure(startItem, grammar));
+    bool added;
+
+    do {
+        added = false;// Indicador de si se ha añadido un nuevo estad
+        // Iteramos sobre todos los estados ya calculados en la colección
+        for (int i = 0; i < collection.size(); i++) {
+            // Mapa para almacenar las transiciones por simbolo para el estado actual
+            map<char, vector<pair<char, string>>> transitionsMap;
+            // Iteramos sobre todos los ítems en el estado actual
+            for (const auto& item : collection[i]) {
+                size_t dotPos = item.second.find('.'); // Encontramos la posición del punto 
+
+                // Si hay un simbolo despues del punto
+                if (dotPos != string::npos && dotPos + 1 < item.second.size()) {
+                    char symbol = item.second[dotPos + 1];
+                    string movedDot = item.second;
+                    // Movemos el punto hacia adelante en la producción (es decir, S -> .A se convierte en S -> A.)
+                    swap(movedDot[dotPos], movedDot[dotPos + 1]);
+                    // Guardamos la nueva produccion con el punto movido en el mapa de transiciones
+                    transitionsMap[symbol].push_back({item.first, movedDot});
+                }
+            }
+            // Para cada simbolo y su lista de ítems correspondientes, calculamos el nuevo estado
+            for (const auto& [symbol, items] : transitionsMap) {
+                // Calculamos la clausura del conjunto de ítems (nuevo estado)
+                vector<pair<char, string>> newState = closure(items, grammar);
+                // Buscamos si el nuevo estado ya existe en la colección de estados
+                auto it = find(collection.begin(), collection.end(), newState);
+                int newStateIndex;
+                // Si el nuevo estado no existe, lo agregamos a la colección
+                if (it == collection.end()) {
+                    collection.push_back(newState);
+                    newStateIndex = collection.size() - 1;
+                    added = true;// Indicamos que se ha agregado un nuevo estado
+                } else {
+                    newStateIndex = distance(collection.begin(), it);
+                }
+                // Guardamos la transición desde el estado actual (i) al nuevo estado con el símbolo 'symbol'
+                transitions[{i, symbol}] = newStateIndex;
+            }
+        }
+    } while (added);// Continuamos si se han agregado nuevos estados
+
+    return {collection, transitions};
+}
+
+
+// Funcion para imprimir el autómata canonico
+void printCanonicalAutomaton(const vector<vector<pair<char, string>>>& collection, const map<pair<int, char>, int>& transitions) {
+    cout << "Estados del autómata canónico:" << endl;
+    // Iteramos sobre todos los estados en el autómata
+    for (int i = 0; i < collection.size(); i++) {
+        cout << "Estado " << i << ":" << endl;
+        // Para cada estado, imprimimos las producciones (items) que contiene
+        for (const auto& item : collection[i]) {
+            cout << "  " << item.first << " -> " << item.second << endl;
+        }
+    }
+
+    cout << "\nTransiciones del autómata canónico:" << endl;
+    // Iteramos sobre todas las transiciones entre estados
+    for (const auto& [key, dest] : transitions) {
+        // key.first es el estado desde el que se hace la transición
+        // key.second es el símbolo por el que se transita
+        // dest es el estado destino
+        cout << "Desde el estado " << key.first << " con símbolo '" << key.second << "' va al estado " << dest << endl;
+    }
+}
+
+int findFirstStateWithSymbolBeforeDot(const vector<vector<pair<char, string>>>& canonicalCollection, char symbol, char itemFirst) {
+    // Recorremos cada estado
+    for (int i = 0; i < canonicalCollection.size(); ++i) {
+        const auto& state = canonicalCollection[i];
+
+        // Recorremos cada item (producción) en el estado
+        for (const auto& item : state) {
+            const string& production = item.second;  // La producción es el segundo elemento del item
+
+            size_t dotPos = production.find('.');  // Encontramos la posicion del punto
+            if (dotPos != string::npos && dotPos > 0) {  // Verificamos que el punto no este al inicio
+                // Verificamos si el simbolo está justo antes del punto y si el item.first coincide
+                if (production[dotPos - 1] == symbol && item.first == itemFirst) {
+                    return i;
+                }
+            }
+        }
+    }
+    return -1;
+}
+struct ProductionInfo {
+    int index;
+    string production;
+};
+ProductionInfo getProductionIndex(const map<char, vector<string>>& grammar, char nonTerminal, const string& itemProduction) {
+    vector<ProductionInfo> productionInfos;
+    // Eliminamos el punto de la producción actual
+    string productionWithoutDot = itemProduction;
+    productionWithoutDot.erase(remove(productionWithoutDot.begin(), productionWithoutDot.end(), '.'), productionWithoutDot.end());
+
+    // Buscamos el índice de la producción original en la gramática
+    auto it = find(grammar.at(nonTerminal).begin(), grammar.at(nonTerminal).end(), productionWithoutDot);
+    if (it != grammar.at(nonTerminal).end()) {
+        int index = distance(grammar.at(nonTerminal).begin(), it) + 1; // Sumamos 1 para que empiece en 1 en vez de 0
+        return {index, productionWithoutDot}; // Retornamos el índice y la producción sin punto
+    }
+
+    // Si no se encuentra, retornamos un índice -1 y una cadena vacía como producción
+    return {-1, ""};
+}
+
+// Función para calcular la tabla SLR (Shift-Reduce) a partir de la colección de estados canónicos,
+// la gramática y las propiedades asociadas a los no terminales
+map<pair<int, char>, string> computeSLRTable(const vector<vector<pair<char, string>>>& canonicalCollection,
+                                             const map<char, vector<string>>& grammar,
+                                             const map<char, Properties>& properties) {
+
+    // Esta tabla guardará las acciones (desplazamiento, reduccion o aceptacion) para cada par (estado, simbolo)
+    map<pair<int, char>, string> slrTable;
+    // Recorremos cada estado en la coleccion canonica
+    for (int i = 0; i < canonicalCollection.size(); ++i) {
+        const auto& state = canonicalCollection[i];// Estado i en la coleccion
+
+        // Recorremos cada item en el estado actual.
+        for (const auto& item : state) {
+            size_t dotPos = item.second.find('.'); // Encontramos la posicion del punto en la produccion
+
+            // Si el punto no está al final de la produccion, es un desplazamiento
+            if (dotPos != string::npos && dotPos + 1 < item.second.size()) {
+
+                char nextSymbol = item.second[dotPos + 1]; // Símbolo después del punto
+                if(isupper(nextSymbol)){
+                    int toState = findFirstStateWithSymbolBeforeDot(canonicalCollection, nextSymbol,item.first);
+
+                    slrTable[{i, nextSymbol}] =  to_string(toState);
+                }else{
+                    int toState = findFirstStateWithSymbolBeforeDot(canonicalCollection, nextSymbol,item.first);
+
+                    slrTable[{i, nextSymbol}] = "s" + to_string(toState);
+                }
+
+            }
+                // Si el punto esta al final de la producción, es una posible reduccion
+            else if (dotPos == item.second.size() - 1) {
+                // Si es la producción de aceptación 'S -> .S', generamos la acción de aceptacion
+
+                if (item.first == 'W' && item.second == grammar.at('W')[0] + ".") {
+                    slrTable[{i, '$'}] = "acc"; // Acción de aceptación
+
+                } else {
+                    // Si el punto está al final de la producción, generamos las acciones de reducción 
+                    // Esto se hace con los símbolos del conjunto Follow del no terminal de la produccion
+                    // Generar las acciones de reducción usando el conjunto Follow del no terminal
+                    for (char follow : properties.at(item.first).followSet) {
+                        // Encontramos el índice de la producción que estamos reduciendo
+                        // Esto corresponde a la regla de la gramática que generó este item
+
+                        int prodIndex = getProductionIndex(grammar, item.first, item.second).index;
+                        // La acción de reducción  se agrega a la tabla con r'seguido del índice de la produccion
+                        slrTable[{i, follow}] = "r" + to_string(prodIndex); // Accion de reducción
+                    }
+                }
+            }
+        }
+    }
+
+    return slrTable;
+}
+
+void lrParsing(const string& input, map<pair<int, char>, string>& slrTable) {
+    stack<int> stateStack;  // Pila para los estados
+    stack<char> symbolStack; // Pila para los simbolos
+    stateStack.push(0); // Estado inicial
+
+    int index = 0;
+    char currentChar = input[index];
+
+    while (true) {
+        int currentState = stateStack.top();// Empezamos con el primer simbolo de la entrada
+
+        // Obtener la accion para el estado y símbolo actuales
+        if (slrTable.count({currentState, currentChar}) == 0) {
+            cout << "Error: Entrada no pertenece al lenguaje LR0." << endl;
+            return;// Si no existe una acción valida, la entrada no es aceptada
+        }
+
+        string action = slrTable[{currentState, currentChar}];// Obtener la accion correspondiente
+
+        if (action[0] == 's') {  // Accion de desplazamiento
+            int nextState = stoi(action.substr(1)); // Obtener el siguiente estado
+            stateStack.push(nextState);  // Apilar el siguiente estado
+            symbolStack.push(currentChar); // Apilar el simbolo actual
+            index++;  // Avanzar al siguiente simbolo de entrada
+            // Si aun no hemos llegado al final de la entrada, obtenemos el siguiente símbolo
+            if (index < input.size()) { // Accion de desplazamiento 
+                currentChar = input[index];  // Obtener el siguiente símbolo
+            } else {
+                currentChar = '$';  // Fin de la cadena
+            }
+        }
+        else if (action[0] == 'r') {
+            int productionIndex = stoi(action.substr(1));  // Obtener el indice de la produccion
+            // Obtener la producción correspondiente 
+            string production = "A -> " + to_string(productionIndex); // Esta linea es un ejemplo, necesitarias obtener la produccion real
+
+            cout << "Reducción con la producción: " << production << endl;
+
+            // Reducir: Desapilar los smbolos y estados correspondientes según la produccion
+            // La longitud de la producción nos indica cuántos simbolos debemos desapilar
+            int numSymbolsToPop = production.size() - 3;  // Restamos 3 para ignorar "A ->"
+            for (int i = 0; i < numSymbolsToPop; i++) {
+                stateStack.pop(); // Desapilar estado
+                symbolStack.pop(); // Desapilar simbolo
+            }
+
+            // Obtener el siguiente estado de la pila para hacer el "goto"
+            currentState = stateStack.top();  // Obtener el estado actual en la pila
+            string nextAction = slrTable[{currentState, symbolStack.top()}];  // Buscar la accion correspondiente al estado y simbolo
+            int nextState = stoi(nextAction.substr(1)); // El siguiente estado que corresponde al "goto"
+            stateStack.push(nextState);  // Apilar el estado después de la reducción
+            symbolStack.push(symbolStack.top());  // Apilar el símbolo de la izquierda de la producción
+        }
+        else if (action == "acc") {  // Acción de aceptación
+            cout << "Cadena aceptada LR0." << endl;
+            return;  // Aceptación exitosa
+        }
+    }
+}
+
+
+// Función principal
+int main() {
+    SetConsoleOutputCP(CP_UTF8); // Para soportar caracteres en UTF-8
+
+    int cases;
+    cin >> cases;
+
+    // Calcula first y Follow para cada caso antes de mostrar el menú
+    for (int i = 0; i < (cases); i++) {
+        int gLines;
+        cin >> gLines; // Numero de líneas de la gramática.
+        cin.ignore();
+
+        // Obtener la gramatica
+        Gramatica gramatica = getGrammar(gLines);
+        map<char, Properties> properties;
+
+        // Obtener Firsts y Follows
+        getFirsts(properties, gramatica);
+        getFollows(properties, gramatica);
+
+        // Imprimir Firsts y Follows
+        printFirsts(properties, gramatica);
+        printFollows(properties, gramatica);
+    }
+
+    // Menu de selección de análisis
+    int opcion;
+    string input;
+
+    do {
+        // Mostrar menu
+        cout << "\n--- Menú ---" << endl;
+        cout << "1. Top Down" << endl;
+        cout << "2. Bottom Up" << endl;
+        cout << "3. Salir" << endl;
+        cout << "Elige una opción: ";
+        cin >> opcion;
+
+        switch(opcion) {
+            case 1: {
+                cout << "Ingrese el numero de no terminales mas la gramatica de esta manera";
+                cout << "\n3\n"
+                        "S AB\n"
+                        "A a e\n"
+                        "B b\n";
+                // Solicitar entrada para el analizador top-down
+                int gLines;
+                cin >> gLines; // Numero de líneas de la gramática.
+                cin.ignore();
+                // Obtener la gramática
+                Gramatica gramatica = getGrammar(gLines);
+                map<char, Properties> properties;
+                map<char, map<char, string>> parsingTable;
+                getFirsts(properties, gramatica);
+                getFollows(properties, gramatica);
+                cout << "Tabla: ";
+                // Análisis top-down y tabla predictiva
+                topDown(properties, gramatica);
+                buildParsingTable(properties, gramatica, parsingTable);
+                cout << "Ingrese la cadena a analizar: ";
+                cin >> input;
+                predictiveParsing(input, parsingTable, 'S');
+                break;
+
+            }
+
+            case 2: {
+                cout << "Ingrese el numero de no terminales mas la gramatica de esta manera";
+                cout << "\n3\n"
+                        "S AB\n"
+                        "A a e\n"
+                        "B b\n";
+                // Solicitar entrada para el analizador bottom-up
+                int gLines;
+                cin >> gLines; // numero de líneas de la gramática.
+                cin.ignore();
+                // Obtener la gramatica
+
+                Gramatica gramatica = getGrammar(gLines);
+                char nonTerminal = 'W';
+                string production = "S";
+                gramatica.gramatica[nonTerminal].push_back(production);
+                map<char, Properties> properties;
+                // Obtener Firsts y Follows
+                getFirsts(properties, gramatica);
+                getFollows(properties, gramatica);
+
+                auto [canonicalCollection, automatonTransitions] = computeCanonicalAutomaton(gramatica.gramatica);
+                // Análisis bottom-up con automata canónico y tabla SLR
+                cout << "Automata ";
+                printCanonicalAutomaton(canonicalCollection, automatonTransitions);
+                map<pair<int, char>, string> slrTable = computeSLRTable(canonicalCollection, gramatica.gramatica, properties);
+
+                cout << "\nTabla SLR:" << endl;
+                for (const auto& entry : slrTable) {
+                    cout << "[" << entry.first.first << ", " << entry.first.second << "] = " << entry.second << endl;
+
+                }
+                cout << "Ingrese la cadena para el análisis LR(0): ";
+                cin >> input;
+                lrParsing(input, slrTable);
+                break;
+            }
+
+            case 3:
+                cout << "Saliendo del programa..." << endl;
+                break;
+
+            default:
+                cout << "Opción no válida, intenta de nuevo." << endl;
+        }
+    } while(opcion != 3);
+
+    return 0;
+}
